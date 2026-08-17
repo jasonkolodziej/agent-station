@@ -1,0 +1,45 @@
+# Class A, beta. Requires Gemini CLI v0.26.0+ for hooks.
+#
+# CRITICAL CONSTRAINT: Gemini CLI hooks run SYNCHRONOUSLY inside the agent loop
+# and it waits for all matching hooks to complete before continuing. Also, stdout
+# must contain nothing but the final JSON object — a single stray echo breaks
+# parsing and the CLI treats the whole output as a systemMessage.
+#
+# Both facts are why the shim writes diagnostics to stderr only and why its
+# latency budget is non-negotiable.
+[provider]
+id           = "gemini-cli"
+display_name = "Gemini CLI"
+class        = "A"
+maturity     = "beta"
+icon         = "gemini.svg"
+detect       = { binary = "gemini", config_dir = "~/.gemini" }
+
+[capabilities]
+inline_approval = true
+turn_events     = true
+tool_events     = true
+subagent_events = false
+usage_stream    = false
+cancel_run      = false
+
+[install]
+config_path = "~/.gemini/settings.json"
+format      = "json-merge"
+scope       = "user"
+patch = '''
+{ "hooks": {
+    "Notification": [{ "matcher": "", "hooks": [{ "type": "command", "command": "${SHIM} --provider gemini-cli --await-decision" }] }],
+    "AfterAgent":   [{ "matcher": "", "hooks": [{ "type": "command", "command": "${SHIM} --provider gemini-cli" }] }]
+} }
+'''
+
+[[map]]
+when     = "hook_event_name == 'Notification'"
+emit     = "attention.required"
+title    = "$.message"
+decision = "inline"
+
+[[map]]
+when = "hook_event_name == 'AfterAgent'"
+emit = "turn.completed"

@@ -1,0 +1,22 @@
+[package]
+name = "agentstation-hook"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+description = "Ingress shim for Agent Station. Invoked by agent hooks; must never block an agent loop."
+
+# NO DEPENDENCIES. Deliberate — see docs/adr/0003-zero-dep-shim.md.
+# Every crate added here is dyld work on a path with a 10ms p99 budget that
+# runs on every single agent lifecycle event.
+[dependencies]
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[[bin]]
+name = "agentstation-hook"
+path = "src/main.rs"

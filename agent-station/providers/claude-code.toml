@@ -1,0 +1,77 @@
+# Class A reference manifest. Everything else is measured against this one.
+[provider]
+id           = "claude-code"
+display_name = "Claude Code"
+class        = "A"
+maturity     = "ga"
+icon         = "claude-code.svg"
+detect       = { binary = "claude", config_dir = "~/.claude" }
+
+[capabilities]
+inline_approval = true
+turn_events     = true
+tool_events     = true
+subagent_events = true
+usage_stream    = true
+cancel_run      = false
+
+[install]
+config_path = "~/.claude/settings.json"
+format      = "json-merge"
+scope       = "user"     # never project scope: that file is shared with a team
+patch = '''
+{ "hooks": {
+    "SessionStart":  [{ "matcher": "", "hooks": [{ "type": "command", "command": "${SHIM} --provider claude-code" }] }],
+    "SessionEnd":    [{ "matcher": "", "hooks": [{ "type": "command", "command": "${SHIM} --provider claude-code" }] }],
+    "Notification":  [{ "matcher": "", "hooks": [{ "type": "command", "command": "${SHIM} --provider claude-code --await-decision" }] }],
+    "Stop":          [{ "hooks": [{ "type": "command", "command": "${SHIM} --provider claude-code" }] }],
+    "SubagentStop":  [{ "hooks": [{ "type": "command", "command": "${SHIM} --provider claude-code" }] }],
+    "StopFailure":   [{ "hooks": [{ "type": "command", "command": "${SHIM} --provider claude-code" }] }]
+} }
+'''
+
+# Notification matchers: permission_prompt, idle_prompt, auth_success
+[[map]]
+when     = "hook_event_name == 'Notification' && matcher == 'permission_prompt'"
+emit     = "approval.requested"
+title    = "$.message"
+risk     = "high"
+decision = "inline"
+
+[[map]]
+when     = "hook_event_name == 'Notification' && matcher == 'idle_prompt'"
+emit     = "attention.required"
+title    = "$.message"
+risk     = "low"
+decision = "terminal_only"
+
+[[map]]
+when  = "hook_event_name == 'Stop'"
+emit  = "turn.completed"
+
+# NOTE: a Stop hook registered inside a subagent is delivered as SubagentStop.
+# Do not treat these as equivalent — a subagent finishing is not the turn ending,
+# and alerting on it is the fastest way to make the island feel like spam.
+[[map]]
+when  = "hook_event_name == 'SubagentStop'"
+emit  = "tool.completed"
+
+[[map]]
+when  = "hook_event_name == 'StopFailure'"
+emit  = "error.raised"
+
+[[map]]
+when  = "hook_event_name == 'SessionStart'"
+emit  = "session.started"
+
+[[map]]
+when  = "hook_event_name == 'SessionEnd'"
+emit  = "session.ended"
+
+[usage]
+source     = "transcript"
+path_glob  = "~/.claude/projects/**/*.jsonl"
+token_path = "$.message.usage"
+# Cache tiers matter enormously here: agent harnesses re-send the same prefix
+# (system prompt, tool defs, CLAUDE.md) every turn. Ignoring cache_read pricing
+# overstates spend by a large multiple.

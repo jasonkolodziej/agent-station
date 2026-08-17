@@ -1,0 +1,9 @@
+.DS_Store
+.spike/
+shim/target/
+daemon/.build/
+extension/node_modules/
+extension/dist/
+extension/*.vsix
+*.xcuserdatad
+build/

@@ -1,0 +1,9 @@
+{
+  "session_id": "6b1f8a2c-0000-4c1a-9f00-aaaaaaaaaaaa",
+  "transcript_path": "/Users/j/.claude/projects/-Users-j-src-meridian/6b1f8a2c.jsonl",
+  "cwd": "/Users/j/src/meridian",
+  "hook_event_name": "Notification",
+  "matcher": "permission_prompt",
+  "message": "Claude needs your permission to run: rm -rf ./dist",
+  "permission_mode": "default"
+}

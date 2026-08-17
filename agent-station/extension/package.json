@@ -1,0 +1,55 @@
+{
+  "name": "agent-station",
+  "displayName": "Agent Station",
+  "description": "Routes agent attention out of the editor and back again.",
+  "version": "0.1.0",
+  "publisher": "agentstation",
+  "engines": { "vscode": "^1.96.0" },
+  "categories": ["AI", "Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./dist/extension.js",
+  "//": "NO enabledApiProposals. vsce hard-errors on publish if this key exists. Proposed-API work lives in src/proposed/ behind a build flag - see docs/adr/0004-vscode-first.md and ARCHITECTURE.md 7.5.",
+  "contributes": {
+    "commands": [
+      { "command": "agentStation.showSessions", "title": "Agent Station: Show Sessions" },
+      { "command": "agentStation.suppressProviderNotifications", "title": "Agent Station: Take Over Agent Notifications" },
+      { "command": "agentStation.restoreProviderNotifications", "title": "Agent Station: Restore Original Notification Settings" },
+      { "command": "agentStation.reconnect", "title": "Agent Station: Reconnect to Daemon" }
+    ],
+    "configuration": {
+      "title": "Agent Station",
+      "properties": {
+        "agentStation.socketPath": {
+          "type": "string",
+          "default": "",
+          "description": "Override the daemon socket path. Empty uses the default location."
+        },
+        "agentStation.suppressProviderNotifications": {
+          "type": "boolean",
+          "default": false,
+          "description": "Turn off other agent extensions' own OS notifications so Agent Station is the single attention surface. Always shows a diff before writing, and is fully reversible."
+        },
+        "agentStation.bindIntegratedTerminalSessions": {
+          "type": "boolean",
+          "default": true,
+          "description": "Bind CLI agent sessions running in the integrated terminal to this window, so Jump-to-session lands in the right place."
+        },
+        "agentStation.statusBar.enabled": { "type": "boolean", "default": true }
+      }
+    }
+  },
+  "scripts": {
+    "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --platform=node --format=cjs",
+    "watch": "npm run build -- --watch --sourcemap",
+    "package": "vsce package",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.96.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}

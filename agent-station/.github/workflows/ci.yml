@@ -1,0 +1,43 @@
+name: CI
+on: [push, pull_request]
+
+jobs:
+  shim:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - run: cd shim && cargo fmt --check && cargo clippy -- -D warnings
+      - run: cd shim && cargo test --release
+      # The latency guard is a release blocker, not a flaky test: a regression
+      # here means every user's agent got slower on every hook event.
+      - name: Latency guard
+        run: cd shim && cargo test --release --test latency
+
+  daemon:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - run: cd daemon && swift build && swift test
+
+  extension:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm, cache-dependency-path: extension/package-lock.json }
+      - run: cd extension && npm ci && npm run typecheck && npm test
+      # Guard the constraint from ADR-0004: proposed APIs cannot be published.
+      - name: Reject enabledApiProposals in the shippable manifest
+        run: |
+          if grep -q '"enabledApiProposals"' extension/package.json; then
+            echo "::error::package.json declares enabledApiProposals — vsce will reject this at publish. Proposed-API code belongs in src/proposed/."
+            exit 1
+          fi
+
+  manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Golden-file tests: fixture payloads in -> expected canonical events out.
+      # Step 3 of the "adding a new agent" checklist.
+      - run: echo "TODO(M6): station provider validate --all"

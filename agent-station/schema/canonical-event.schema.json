@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentstation.dev/schema/canonical-event.v1.json",
+  "title": "Agent Station canonical event",
+  "type": "object",
+  "required": ["v", "event", "ts", "provider", "session", "payload"],
+  "properties": {
+    "v": { "const": 1 },
+    "event": {
+      "enum": ["session.started","session.ended","turn.started","turn.completed",
+               "attention.required","approval.requested","approval.resolved",
+               "tool.started","tool.completed","usage.sampled","error.raised"]
+    },
+    "ts": { "type": "string", "format": "date-time" },
+    "provider": { "type": "string" },
+    "provider_event": {
+      "type": ["string","null"],
+      "description": "Verbatim provider event name. When a provider changes schema this is the only thing that makes the break debuggable."
+    },
+    "session": {
+      "type": "object",
+      "required": ["id","cwd","surface","started_at"],
+      "properties": {
+        "id": { "type": "string" },
+        "project_id": { "type": ["string","null"] },
+        "cwd": { "type": "string" },
+        "surface": { "enum": ["terminal","ide","cloud","headless"] },
+        "model": { "type": ["string","null"] },
+        "started_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "focus": {
+      "type": ["object","null"],
+      "description": "Captured ONCE at session start from the shim's environment. Unrecoverable later.",
+      "properties": {
+        "term_program": { "type": "string" },
+        "iterm_session_id": { "type": "string" },
+        "term_session_id": { "type": "string" },
+        "tmux_pane": { "type": "string" },
+        "vscode_pid": { "type": ["integer","string"] },
+        "ide_window_id": { "type": "string" },
+        "workspace_uri": { "type": "string" },
+        "host_pid": { "type": "integer" },
+        "cwd": { "type": ["string","null"] }
+      }
+    },
+    "payload": {
+      "type": "object",
+      "required": ["decision_channel"],
+      "properties": {
+        "kind": { "enum": ["approval","input","elicitation","idle"] },
+        "title": { "type": "string" },
+        "detail": { "type": "string" },
+        "risk": { "enum": ["low","medium","high"] },
+        "decision_channel": {
+          "enum": ["inline","terminal_only","none"],
+          "description": "Drives whether the island offers Approve or only Jump. Never set inline for a Class B provider."
+        },
+        "deadline_ms": { "type": "integer" }
+      }
+    },
+    "reply_token": {
+      "type": ["string","null"],
+      "description": "Present iff payload.decision_channel == 'inline'. Single-use, session-scoped, expires with the deadline."
+    }
+  }
+}

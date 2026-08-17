@@ -1,0 +1,18 @@
+# TODO(M6): classify before writing anything else. Run:
+#   station provider validate openclaw
+# Do not guess capabilities — probe them. A wrong inline_approval flag produces
+# an Approve button that silently does nothing, which is worse than no button.
+[provider]
+id           = "openclaw"
+display_name = "openclaw"
+class        = "C"
+maturity     = "experimental"
+icon         = "openclaw.svg"
+
+[capabilities]
+inline_approval = false
+turn_events     = false
+tool_events     = false
+subagent_events = false
+usage_stream    = false
+cancel_run      = false

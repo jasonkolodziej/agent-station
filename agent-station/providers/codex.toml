@@ -1,0 +1,45 @@
+# Class B reference manifest — the honest-degradation case.
+#
+# Codex's notify hook has exactly ONE event (agent-turn-complete), hands the
+# payload as an argv argument rather than stdin, and has no return channel. It
+# cannot block a tool call. Therefore: NO inline approvals for Codex, ever. A
+# Codex permission prompt has to be answered in the terminal.
+#
+# The UI must render "Jump to terminal", not a dead Approve button. This is the
+# whole reason ProviderCapabilities exists.
+[provider]
+id           = "codex"
+display_name = "Codex CLI"
+class        = "B"
+maturity     = "ga"
+icon         = "codex.svg"
+detect       = { binary = "codex", config_dir = "~/.codex" }
+
+[capabilities]
+inline_approval = false
+turn_events     = true
+tool_events     = false
+subagent_events = false
+usage_stream    = false
+cancel_run      = false
+
+[install]
+config_path = "~/.codex/config.toml"
+# TOML GOTCHA: `notify` is a root key and MUST be written above any [table].
+# Writing it after a table silently reparents it and breaks the file. This is
+# why the format is its own variant rather than a generic toml merge.
+format      = "toml-root-key"
+scope       = "user"
+patch = '''
+notify = ["${SHIM}", "--provider", "codex", "--payload-argv"]
+'''
+
+[[map]]
+when     = "type == 'agent-turn-complete'"
+emit     = "turn.completed"
+title    = "$.['last-assistant-message'] | truncate(80)"
+decision = "none"
+
+[usage]
+source    = "transcript"
+path_glob = "~/.codex/sessions/**/*.jsonl"

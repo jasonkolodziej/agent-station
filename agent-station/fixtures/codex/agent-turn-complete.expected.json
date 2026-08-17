@@ -1,0 +1,8 @@
+[
+  {
+    "event": "turn.completed",
+    "provider": "codex",
+    "provider_event": "agent-turn-complete",
+    "payload": { "decision_channel": "none" }
+  }
+]

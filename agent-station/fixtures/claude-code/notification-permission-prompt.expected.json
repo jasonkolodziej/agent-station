@@ -1,0 +1,9 @@
+[
+  {
+    "event": "approval.requested",
+    "provider": "claude-code",
+    "provider_event": "Notification",
+    "session": { "id": "cc:6b1f8a2c-0000-4c1a-9f00-aaaaaaaaaaaa", "cwd": "/Users/j/src/meridian", "surface": "terminal" },
+    "payload": { "kind": "approval", "risk": "high", "decision_channel": "inline" }
+  }
+]

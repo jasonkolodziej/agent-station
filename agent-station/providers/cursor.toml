@@ -1,0 +1,51 @@
+# Class A + D. Cursor is a VS Code fork: it loads our extension AND supports
+# hooks.json. Prefer the hook path for events (fires for cursor-agent CLI too)
+# and the extension path for focus routing.
+#
+# KNOWN GAP: cursor-agent (CLI) has been reported to emit only
+# beforeShellExecution/afterShellExecution while the IDE emits the full set.
+# Probe at install time and downgrade capabilities rather than assuming parity.
+[provider]
+id           = "cursor"
+display_name = "Cursor"
+class        = "A"
+maturity     = "ga"
+icon         = "cursor.svg"
+detect       = { binary = "cursor-agent", config_dir = "~/.cursor", bundle_id = "com.todesktop.230313mzl4w4u92" }
+
+[capabilities]
+inline_approval = true
+turn_events     = true
+tool_events     = true
+subagent_events = true
+usage_stream    = false
+cancel_run      = false
+
+[install]
+config_path = "~/.cursor/hooks.json"
+format      = "json-merge"
+scope       = "user"   # project-level hooks.json is committed and shared - never touch it
+patch = '''
+{ "version": 1, "hooks": {
+    "sessionStart":        [{ "command": "${SHIM} --provider cursor" }],
+    "sessionEnd":          [{ "command": "${SHIM} --provider cursor" }],
+    "afterAgentResponse":  [{ "command": "${SHIM} --provider cursor" }],
+    "beforeShellExecution":[{ "command": "${SHIM} --provider cursor --await-decision" }],
+    "stop":                [{ "command": "${SHIM} --provider cursor" }]
+} }
+'''
+
+[[map]]
+when = "hook_event_name == 'stop'"
+emit = "turn.completed"
+
+[[map]]
+when     = "hook_event_name == 'beforeShellExecution'"
+emit     = "approval.requested"
+title    = "$.command | truncate(80)"
+risk     = "high"
+decision = "inline"
+
+[[map]]
+when = "hook_event_name == 'sessionStart'"
+emit = "session.started"

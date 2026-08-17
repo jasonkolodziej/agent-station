@@ -1,0 +1,18 @@
+# TODO(M6): classify before writing anything else. Run:
+#   station provider validate qwen-code
+# Do not guess capabilities — probe them. A wrong inline_approval flag produces
+# an Approve button that silently does nothing, which is worse than no button.
+[provider]
+id           = "qwen-code"
+display_name = "qwen-code"
+class        = "C"
+maturity     = "experimental"
+icon         = "qwen-code.svg"
+
+[capabilities]
+inline_approval = false
+turn_events     = false
+tool_events     = false
+subagent_events = false
+usage_stream    = false
+cancel_run      = false
