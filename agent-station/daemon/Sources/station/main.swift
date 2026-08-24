@@ -17,7 +17,11 @@ struct Station: AsyncParsableCommand {
 struct Tail: AsyncParsableCommand {
     static let configuration = CommandConfiguration(abstract: "Stream canonical events as they arrive")
 
-    @Flag(name: .long, help: "Print each event's raw wire JSON instead of a formatted summary.")
+    @Flag(name: .long, help: """
+        Dump the verbatim provider payload for each event instead of a \
+        formatted summary — pipe into a file to capture a golden fixture \
+        (see fixtures/README.md).
+        """)
     var raw = false
 
     func run() async throws {
@@ -36,28 +40,16 @@ struct Tail: AsyncParsableCommand {
         }
         print("Tailing \(UnixSocketServer.defaultPath.path) — Ctrl-C to stop.")
 
-        let wantRaw = raw
-        try DaemonClient.tail(
-            onEvent: { event in
-                if wantRaw {
-                    if let data = try? Self.rawEncoder.encode(event), let s = String(data: data, encoding: .utf8) {
-                        print(s)
-                    }
-                } else {
-                    print(Self.format(event))
-                }
-            },
-            onDisconnect: {
-                print("agentstationd closed the connection.")
-            }
-        )
+        if raw {
+            try DaemonClient.tailRaw(
+                onLine: { print($0) },
+                onDisconnect: { print("agentstationd closed the connection.") })
+        } else {
+            try DaemonClient.tail(
+                onEvent: { print(Self.format($0)) },
+                onDisconnect: { print("agentstationd closed the connection.") })
+        }
     }
-
-    private static let rawEncoder: JSONEncoder = {
-        let e = JSONEncoder()
-        e.dateEncodingStrategy = .iso8601
-        return e
-    }()
 
     private static func format(_ event: CanonicalEvent) -> String {
         var line = "\(ISO8601DateFormatter().string(from: event.ts))  "

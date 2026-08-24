@@ -22,14 +22,48 @@ public enum DaemonClient {
         onEvent: @escaping (CanonicalEvent) -> Void,
         onDisconnect: @escaping () -> Void = {}
     ) throws {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        try subscribeAndReadLines(socketPath: socketPath, raw: false, onDisconnect: onDisconnect) { line in
+            guard let event = try? decoder.decode(CanonicalEvent.self, from: line) else { return }
+            onEvent(event)
+        }
+    }
+
+    /// Connects on the raw-payload channel and streams each verbatim provider
+    /// payload dump to `onLine` as its exact wire text — this is the
+    /// `station tail --raw` capture path fixtures/README.md documents for
+    /// building golden fixtures, so callers get the bytes to inspect/save
+    /// directly rather than a re-decoded structure.
+    public static func tailRaw(
+        socketPath: URL = UnixSocketServer.defaultPath,
+        onLine: @escaping (String) -> Void,
+        onDisconnect: @escaping () -> Void = {}
+    ) throws {
+        try subscribeAndReadLines(socketPath: socketPath, raw: true, onDisconnect: onDisconnect) { line in
+            guard let s = String(data: line, encoding: .utf8) else { return }
+            onLine(s)
+        }
+    }
+
+    /// True if the daemon's socket file exists — the same fail-open check the
+    /// shim itself makes before attempting to connect.
+    public static func isDaemonReachable(socketPath: URL = UnixSocketServer.defaultPath) -> Bool {
+        FileManager.default.fileExists(atPath: socketPath.path)
+    }
+
+    // MARK: - Shared connect/subscribe/read loop
+
+    private static func subscribeAndReadLines(
+        socketPath: URL, raw: Bool, onDisconnect: @escaping () -> Void, onLine: (Data) -> Void
+    ) throws {
         let fd = try openConnection(to: socketPath)
         defer { close(fd) }
 
-        let request = Data(#"{"op":"subscribe"}"#.utf8) + Data([0x0A])
+        let requestBody = raw ? #"{"op":"subscribe","raw":true}"# : #"{"op":"subscribe"}"#
+        let request = Data(requestBody.utf8) + Data([0x0A])
         _ = request.withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
-
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
 
         var buffer = Data()
         var chunk = [UInt8](repeating: 0, count: 4096)
@@ -40,16 +74,10 @@ public enum DaemonClient {
             while let newlineIndex = buffer.firstIndex(of: 0x0A) {
                 let line = buffer[..<newlineIndex]
                 buffer.removeSubrange(buffer.startIndex...newlineIndex)
-                guard !line.isEmpty, let event = try? decoder.decode(CanonicalEvent.self, from: line) else { continue }
-                onEvent(event)
+                guard !line.isEmpty else { continue }
+                onLine(line)
             }
         }
-    }
-
-    /// True if the daemon's socket file exists — the same fail-open check the
-    /// shim itself makes before attempting to connect.
-    public static func isDaemonReachable(socketPath: URL = UnixSocketServer.defaultPath) -> Bool {
-        FileManager.default.fileExists(atPath: socketPath.path)
     }
 
     private static func openConnection(to path: URL) throws -> Int32 {

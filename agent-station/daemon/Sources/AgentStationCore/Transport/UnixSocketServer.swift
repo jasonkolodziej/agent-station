@@ -151,8 +151,8 @@ public actor UnixSocketServer {
             return
         }
 
-        if isSubscribeRequest(line), let subscribers {
-            subscribers.add(fd: fd)
+        if let wantsRaw = subscribeMode(line), let subscribers {
+            subscribers.add(fd: fd, raw: wantsRaw)
             // Block until the peer disconnects, so we know when to drop it
             // from the broadcast set. We never read a second request off a
             // subscriber connection — it's push-only from here on.
@@ -173,9 +173,14 @@ public actor UnixSocketServer {
         // an --await-decision shim is already built to fail open on.
     }
 
-    private nonisolated static func isSubscribeRequest(_ line: Data) -> Bool {
-        guard let obj = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else { return false }
-        return (obj["op"] as? String) == "subscribe"
+    /// `{"op":"subscribe"}` for canonical events, `{"op":"subscribe","raw":true}`
+    /// for the verbatim-payload capture channel `station tail --raw` uses.
+    /// Returns nil if this isn't a subscribe request at all.
+    private nonisolated static func subscribeMode(_ line: Data) -> Bool? {
+        guard let obj = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+              (obj["op"] as? String) == "subscribe"
+        else { return nil }
+        return (obj["raw"] as? Bool) ?? false
     }
 
     /// Reads exactly one top-level JSON value (object or array), tracking

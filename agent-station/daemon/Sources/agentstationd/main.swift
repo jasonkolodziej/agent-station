@@ -42,6 +42,12 @@ struct Daemon {
         _ raw: RawEvent, registry: AdapterRegistry, normalizer: Normalizer,
         store: Store, arbiter: AttentionArbiter, subscribers: SubscriberHub
     ) async {
+        // Fans out to raw-mode subscribers (`station tail --raw`, the golden
+        // fixture capture path fixtures/README.md documents) unconditionally
+        // — SubscriberHub is a no-op broadcast when nobody's listening in
+        // that mode, so this never costs anything on the hot path.
+        subscribers.publishRaw(raw)
+
         let result: Normalizer.Result
         do {
             result = try await normalizer.normalize(raw, using: registry)

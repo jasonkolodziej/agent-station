@@ -8,38 +8,67 @@ import Darwin
 /// delimited JSON, to every connected subscriber fd (station CLI, menu bar,
 /// notch app, VS Code extension bridge).
 ///
-/// Lock-protected, not an actor: `publish` does blocking `write(2)` calls, and
-/// blocking inside an actor ties up a thread from Swift's cooperative pool.
-/// This mirrors `UnixSocketServer`'s own choice to keep raw POSIX I/O off of
-/// Swift concurrency's executors entirely.
+/// Two subscription modes, matching `station tail` vs `station tail --raw`:
+/// - canonical (default): the mapped `CanonicalEvent`.
+/// - raw: the verbatim provider payload, pre-normalization. This is the
+///   `station tail --raw` capture path fixtures/README.md documents as how
+///   golden fixtures get built — "Capture real payloads, don't hand-write
+///   them" — so it has to carry what the provider actually sent, not a
+///   re-description of what the mapping produced from it.
+///
+/// Lock-protected, not an actor: `publish`/`publishRaw` do blocking `write(2)`
+/// calls, and blocking inside an actor ties up a thread from Swift's
+/// cooperative pool. This mirrors `UnixSocketServer`'s own choice to keep raw
+/// POSIX I/O off of Swift concurrency's executors entirely.
 public final class SubscriberHub: @unchecked Sendable {
     private let lock = NSLock()
-    private var subscriberFDs: Set<Int32> = []
+    /// fd -> wants raw payloads instead of canonical events.
+    private var subscribers: [Int32: Bool] = [:]
 
     public init() {}
 
-    public func add(fd: Int32) {
+    public func add(fd: Int32, raw: Bool) {
         lock.lock()
-        subscriberFDs.insert(fd)
+        subscribers[fd] = raw
         lock.unlock()
     }
 
     public func remove(fd: Int32) {
         lock.lock()
-        subscriberFDs.remove(fd)
+        subscribers[fd] = nil
         lock.unlock()
     }
 
-    /// Best-effort broadcast. A subscriber that can't keep up or has gone
-    /// away is dropped silently — a slow CLI reader must never back-pressure
-    /// the ingestion pipeline.
+    /// Best-effort broadcast to canonical-mode subscribers. A subscriber that
+    /// can't keep up or has gone away is dropped silently — a slow CLI reader
+    /// must never back-pressure the ingestion pipeline.
     public func publish(_ event: CanonicalEvent) {
         guard let data = try? Self.encoder.encode(event) else { return }
-        var line = data
+        broadcast(data, toRaw: false)
+    }
+
+    /// Best-effort broadcast to raw-mode subscribers. Re-serializes the
+    /// already-parsed payload (parseEnvelope round-tripped it through
+    /// JSONSerialization), so this isn't guaranteed byte-identical to what the
+    /// provider sent — key order and whitespace can differ — but it's
+    /// semantically the same payload, which is what a fixture capture needs.
+    public func publishRaw(_ raw: RawEvent) {
+        var dict: [String: Any] = [
+            "provider": raw.provider.rawValue,
+            "received_at": ISO8601DateFormatter().string(from: raw.receivedAt),
+            "truncated": raw.truncated,
+        ]
+        dict["raw"] = (try? JSONSerialization.jsonObject(with: raw.raw)) ?? NSNull()
+        guard let data = try? JSONSerialization.data(withJSONObject: dict) else { return }
+        broadcast(data, toRaw: true)
+    }
+
+    private func broadcast(_ payload: Data, toRaw wantsRaw: Bool) {
+        var line = payload
         line.append(0x0A)
 
         lock.lock()
-        let fds = subscriberFDs
+        let fds = subscribers.filter { $0.value == wantsRaw }.map(\.key)
         lock.unlock()
 
         var dead: [Int32] = []
@@ -57,7 +86,7 @@ public final class SubscriberHub: @unchecked Sendable {
         }
         guard !dead.isEmpty else { return }
         lock.lock()
-        for fd in dead { subscriberFDs.remove(fd) }
+        for fd in dead { subscribers[fd] = nil }
         lock.unlock()
         for fd in dead { close(fd) }
     }

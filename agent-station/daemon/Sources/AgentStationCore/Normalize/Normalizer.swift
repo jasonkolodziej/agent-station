@@ -21,6 +21,7 @@ public struct Normalizer: Sendable {
     public init() {}
 
     public func normalize(_ raw: RawEvent, using registry: AdapterRegistry) async throws -> Result {
+        if let truncated = Self.truncatedResult(raw) { return truncated }
         guard let manifest = await registry.manifest(for: raw.provider) else {
             return Result(events: [], unmapped: UnmappedEvent(
                 provider: raw.provider, providerEvent: nil, seenAt: raw.receivedAt,
@@ -31,6 +32,8 @@ public struct Normalizer: Sendable {
 
     /// Pure, synchronous core — testable without spinning up an AdapterRegistry.
     public func normalize(_ raw: RawEvent, manifest: ProviderManifest) -> Result {
+        if let truncated = Self.truncatedResult(raw) { return truncated }
+
         let object = Self.decodeObject(raw.raw)
         let providerEventName = Self.providerEventName(from: object)
 
@@ -72,6 +75,24 @@ public struct Normalizer: Sendable {
     }
 
     // MARK: - Helpers
+
+    /// The shim caps payloads at 256KB and flags anything that hit the cap
+    /// (`envelope.truncated`) rather than silently sending a cut-off blob. A
+    /// truncated payload almost never parses as valid JSON — and even when it
+    /// does (truncation landing exactly at a top-level boundary), whatever
+    /// mapping "succeeds" is unreliable, built from data we know is
+    /// incomplete. Route straight to unmapped with a marker that's
+    /// distinguishable from "provider changed its schema" in `station
+    /// doctor` — those need different responses (bump the cap vs. fix a
+    /// manifest) and shouldn't look like the same failure.
+    private static func truncatedResult(_ raw: RawEvent) -> Result? {
+        guard raw.truncated else { return nil }
+        let object = decodeObject(raw.raw)
+        let name = providerEventName(from: object) ?? "unknown"
+        return Result(events: [], unmapped: UnmappedEvent(
+            provider: raw.provider, providerEvent: "\(name) [truncated]", seenAt: raw.receivedAt,
+            sampleJSON: String(data: raw.raw, encoding: .utf8)))
+    }
 
     private static func decodeObject(_ data: Data) -> [String: Any] {
         (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
