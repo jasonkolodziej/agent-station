@@ -8,17 +8,24 @@ terminal pane or editor window that needs you.
 
 ---
 
-## ⚠️ Current milestone: M0a — spike, not build
+## Current milestone: M1 — VS Code extension (F11a)
 
-Run `make spike`. Do not start M1 until `docs/adr/0004-vscode-first.md` has its
-"Spike results" section filled in.
+- **M0a (spike) — closed 2026-08-24.** Results in
+  [`docs/adr/0004-vscode-first.md`](./docs/adr/0004-vscode-first.md#spike-results):
+  the stable API exposes no observability of another extension's agent
+  session, which confirms the hook-based approach is the only path for
+  F11a; the reorder holds.
+- **M0b (shim + daemon + SQLite + `station tail`) — done.** Verified against
+  the real shim binary, not just unit tests: `make test` covers the shim
+  latency guard and the daemon's normalize/store/arbiter pipeline; a live
+  trace (shim → daemon → `station tail`) confirmed the ingress path end to
+  end.
+- **M1 (this milestone):** window identity, URI handler, notification
+  suppression, integrated-terminal session binding, status bar — all stable
+  API, Marketplace-publishable. See ARCHITECTURE.md §7.2.
 
-The reordered plan (v0.2) bets on VS Code integration ahead of the CLI provider
-matrix. That bet has a dependency — `chatSessionsProvider` is a **proposed** VS
-Code API and cannot ship to the Marketplace. The spike answers whether the
-stable API exposes enough to make F11a worth building on its own. It does not
-take two days to find out, and finding out in month four instead is the
-expensive version.
+`make spike` still exists to re-run the M0a questions if VS Code's proposed
+API surface changes — see open question 6 in ARCHITECTURE.md §17.
 
 ---
 
