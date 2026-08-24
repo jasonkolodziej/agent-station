@@ -12,9 +12,10 @@ struct Daemon {
         let store = try Store(path: Self.defaultStorePath())
         let arbiter = AttentionArbiter()
         let subscribers = SubscriberHub()
+        let windows = WindowRegistry()
         let server = UnixSocketServer()
 
-        try await server.start(subscribers: subscribers) { raw in
+        try await server.start(subscribers: subscribers, windows: windows) { raw in
             Task {
                 await Self.process(
                     raw, registry: registry, normalizer: normalizer,

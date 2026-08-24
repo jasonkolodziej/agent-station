@@ -11,14 +11,33 @@ const DEFAULT_SOCKET = path.join(
  * Reconnecting UDS client. Backpressure-safe: if the daemon is down we drop
  * messages rather than queue unboundedly. The daemon is the source of truth,
  * not this extension — losing a window-focus ping costs nothing.
+ *
+ * This does NOT send any handshake of its own. The daemon's connection
+ * dispatch (agentstationd's UnixSocketServer) determines what a connection
+ * *is* from the shape of the first message it receives — `{"op":"subscribe"}`
+ * for a pure event subscriber, `{"event":"ide.window.*"}` for a VS Code
+ * window (see windowIdentity.ts). Sending an unrecognized first message gets
+ * the connection silently dropped, so callers own deciding what to send and
+ * when — this client only owns getting bytes there and back.
  */
 export class DaemonClient implements vscode.Disposable {
   private sock: net.Socket | undefined;
   private backoffMs = 250;
   private disposed = false;
   private buf = '';
-  private readonly emitter = new vscode.EventEmitter<Record<string, unknown>>();
-  readonly onEvent = this.emitter.event;
+  private readonly eventEmitter = new vscode.EventEmitter<Record<string, unknown>>();
+  private readonly connectEmitter = new vscode.EventEmitter<void>();
+  readonly onEvent = this.eventEmitter.event;
+  /**
+   * Fires every time the underlying socket connects — including reconnects
+   * after the daemon restarts. Callers that need the daemon to know their
+   * current state (window identity, open terminals) must send it here, not
+   * once at extension activation: activation happens before the first
+   * `connect()` call resolves, and a message sent before 'connect' fires is
+   * silently lost (`sock` is still undefined). Re-sending on every reconnect
+   * is also what makes state survive a daemon restart mid-session.
+   */
+  readonly onConnect = this.connectEmitter.event;
 
   constructor(private readonly socketPath: string = DEFAULT_SOCKET) {}
 
@@ -30,9 +49,12 @@ export class DaemonClient implements vscode.Disposable {
     s.on('connect', () => {
       this.sock = s;
       this.backoffMs = 250;
-      this.send({ event: 'client.hello', client: 'vscode', v: 1 });
+      this.connectEmitter.fire();
     });
-    s.on('data', chunk => this.ingest(chunk));
+    // setEncoding('utf8') above makes this a string at runtime, but the
+    // 'data' event's declared type doesn't track that — decode explicitly
+    // rather than asserting past the type error.
+    s.on('data', (chunk: Buffer | string) => this.ingest(chunk.toString('utf8')));
     s.on('error', () => { /* expected when daemon is down */ });
     s.on('close', () => { this.sock = undefined; this.scheduleReconnect(); });
   }
@@ -44,7 +66,7 @@ export class DaemonClient implements vscode.Disposable {
       const line = this.buf.slice(0, nl);
       this.buf = this.buf.slice(nl + 1);
       if (!line.trim()) continue;
-      try { this.emitter.fire(JSON.parse(line)); } catch { /* ignore junk */ }
+      try { this.eventEmitter.fire(JSON.parse(line)); } catch { /* ignore junk */ }
     }
   }
 
@@ -63,6 +85,7 @@ export class DaemonClient implements vscode.Disposable {
   dispose(): void {
     this.disposed = true;
     this.sock?.destroy();
-    this.emitter.dispose();
+    this.eventEmitter.dispose();
+    this.connectEmitter.dispose();
   }
 }

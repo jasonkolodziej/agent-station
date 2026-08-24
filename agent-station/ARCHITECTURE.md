@@ -415,6 +415,25 @@ await client.send({
 
 The daemon now maps `cwd → open IDE window`, which is what makes F4 work for IDE-hosted sessions.
 
+**This is one connection, not a one-shot request.** The extension sends
+`ide.window.registered` as the first message and then keeps the socket open
+for as long as the window is: `ide.window.focus` on focus change,
+`ide.terminal.open` / `ide.terminal.close` for integrated-terminal binding
+(§7.4's cheap half), and `ide.window.unregistered` on dispose. The daemon
+folds the same connection into the canonical-event broadcast once
+`ide.window.registered` is seen, so the extension's status bar gets live
+events on the connection it already has open rather than a second one.
+Everything here is keyed off the connection's fd server-side — if a window
+disappears without sending `ide.window.unregistered` (crash, force-quit),
+the closed connection itself is the cleanup signal, not a timeout.
+
+`window_id` must be re-sent on every reconnect, not just once at activation:
+the daemon's window registry lives only in live connection state, so a
+daemon restart mid-session drops it, and a message sent before the socket's
+`connect` event fires is silently lost. `daemonClient.ts` exposes `onConnect`
+for exactly this — callers that need the daemon to know their current state
+hook it there, not at extension activation.
+
 **Chat participant (phase 2)** follows the Copilot pattern exactly — `vscode.chat.createChatParticipant('agent-station.station', handler)`, plus a `LanguageModelTool` so *other* agents can ask Agent Station "what's running and what has it cost me today." That inverts the relationship nicely: the station becomes queryable context, not just a notifier.
 
 ### 7.3 Cursor

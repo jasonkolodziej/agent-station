@@ -36,7 +36,15 @@ export function registerWindowIdentity(
   client: DaemonClient,
 ): void {
   const send = () => client.send({ event: 'ide.window.registered', ...currentIdentity() });
-  send();
+
+  // NOT `send()` here directly: `registerWindowIdentity` runs during
+  // `activate()`, before `client.connect()` is even called at the bottom of
+  // it — `client.send` would be writing to a socket that doesn't exist yet.
+  // `onConnect` fires once the connection is actually live, and again on
+  // every reconnect, which is also what re-registers this window if the
+  // daemon restarts mid-session (its WindowRegistry is only ever populated
+  // from live connections, so a fresh connection is the only way back in).
+  ctx.subscriptions.push(client.onConnect(send));
 
   ctx.subscriptions.push(
     vscode.workspace.onDidChangeWorkspaceFolders(send),
@@ -78,7 +86,15 @@ export function bindIntegratedTerminals(
     });
   };
 
-  vscode.window.terminals.forEach(t => void report(t, 'open'));
+  // Same reasoning as registerWindowIdentity: report the terminals that are
+  // ALREADY open every time the connection comes up, not once at activation.
+  // The daemon's terminal bindings live only in the current connection's
+  // WindowRegistry entry — a reconnect after a daemon restart means those
+  // bindings are gone server-side even though the terminals themselves never
+  // closed, so they have to be re-announced, not just the newly-opened ones.
+  ctx.subscriptions.push(
+    client.onConnect(() => vscode.window.terminals.forEach(t => void report(t, 'open'))),
+  );
   ctx.subscriptions.push(
     vscode.window.onDidOpenTerminal(t => void report(t, 'open')),
     vscode.window.onDidCloseTerminal(t => void report(t, 'close')),

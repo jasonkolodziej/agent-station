@@ -51,8 +51,13 @@ public actor UnixSocketServer {
     /// `onEnvelope` is invoked from arbitrary connection-handler threads; it
     /// must be safe to call concurrently. `subscribers`, if given, receives
     /// connections that open with `{"op":"subscribe"}` instead of a hook
-    /// envelope — see SubscriberHub.
-    public func start(subscribers: SubscriberHub? = nil, onEnvelope: @escaping EnvelopeHandler) throws {
+    /// envelope — see SubscriberHub. `windows`, if given, receives the VS
+    /// Code extension's `ide.window.*`/`ide.terminal.*` connections — see
+    /// WindowRegistry and ARCHITECTURE.md §7.2.
+    public func start(
+        subscribers: SubscriberHub? = nil, windows: WindowRegistry? = nil,
+        onEnvelope: @escaping EnvelopeHandler
+    ) throws {
         guard listenFD < 0 else { return }
 
         try FileManager.default.createDirectory(
@@ -100,7 +105,7 @@ public actor UnixSocketServer {
         listenFD = fd
 
         let thread = Thread {
-            Self.acceptLoop(listenFD: fd, subscribers: subscribers, onEnvelope: onEnvelope)
+            Self.acceptLoop(listenFD: fd, subscribers: subscribers, windows: windows, onEnvelope: onEnvelope)
         }
         thread.name = "agentstationd.uds-accept"
         thread.start()
@@ -118,7 +123,10 @@ public actor UnixSocketServer {
     // MARK: - Blocking I/O, off the actor (deliberately `nonisolated static`:
     // this is plain POSIX code with no access to actor state).
 
-    private nonisolated static func acceptLoop(listenFD: Int32, subscribers: SubscriberHub?, onEnvelope: @escaping EnvelopeHandler) {
+    private nonisolated static func acceptLoop(
+        listenFD: Int32, subscribers: SubscriberHub?, windows: WindowRegistry?,
+        onEnvelope: @escaping EnvelopeHandler
+    ) {
         while true {
             let clientFD = accept(listenFD, nil, nil)
             if clientFD < 0 {
@@ -128,13 +136,16 @@ public actor UnixSocketServer {
                 continue
             }
             let connectionThread = Thread {
-                Self.handleConnection(fd: clientFD, subscribers: subscribers, onEnvelope: onEnvelope)
+                Self.handleConnection(fd: clientFD, subscribers: subscribers, windows: windows, onEnvelope: onEnvelope)
             }
             connectionThread.start()
         }
     }
 
-    private nonisolated static func handleConnection(fd: Int32, subscribers: SubscriberHub?, onEnvelope: @escaping EnvelopeHandler) {
+    private nonisolated static func handleConnection(
+        fd: Int32, subscribers: SubscriberHub?, windows: WindowRegistry?,
+        onEnvelope: @escaping EnvelopeHandler
+    ) {
         // Peer validation (ARCHITECTURE.md §12): the connecting process must
         // run as the same user. getpeereid is macOS/BSD's LOCAL_PEERCRED
         // equivalent. Code-signature validation is reserved for the decision
@@ -166,6 +177,27 @@ public actor UnixSocketServer {
             return
         }
 
+        if isIDEMessage(line) {
+            // Unlike a hook envelope (one shot) or a subscriber (push-only
+            // after the first line), a VS Code window is genuinely
+            // multi-message: it sends window.registered once, then
+            // window.focus / terminal.open / terminal.close for as long as
+            // the window is open. Fold it into the canonical-event broadcast
+            // too, so the extension's status bar sees live events on the same
+            // connection it already opened — one persistent connection per
+            // window, matching daemonClient.ts's reconnect-loop design.
+            subscribers?.add(fd: fd, raw: false)
+            var current: Data? = line
+            while let message = current {
+                dispatchIDEMessage(message, fd: fd, windows: windows)
+                current = readOneJSONValue(fd: fd, cap: maxFrameBytes)
+            }
+            windows?.unregister(fd: fd) // safety net if unregistered wasn't sent explicitly
+            subscribers?.remove(fd: fd)
+            close(fd)
+            return
+        }
+
         defer { close(fd) }
         guard let envelope = parseEnvelope(line) else { return }
         onEnvelope(envelope)
@@ -181,6 +213,61 @@ public actor UnixSocketServer {
               (obj["op"] as? String) == "subscribe"
         else { return nil }
         return (obj["raw"] as? Bool) ?? false
+    }
+
+    /// True for any of the VS Code extension's `ide.*` messages
+    /// (ARCHITECTURE.md §7.2) — `windowIdentity.ts`'s `registerWindowIdentity`
+    /// and `bindIntegratedTerminals`.
+    private nonisolated static func isIDEMessage(_ line: Data) -> Bool {
+        guard let obj = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+              let event = obj["event"] as? String
+        else { return false }
+        return event.hasPrefix("ide.")
+    }
+
+    /// Dispatches one message from an IDE-client connection. `query.*`/`ui.*`
+    /// messages the extension also sends over this same connection
+    /// (`query.suppression_rules`, `ui.expand_requested`) aren't handled here
+    /// — those belong to subsystems that don't exist yet (M3's arbiter
+    /// aggregation, M4's suppression-rule resolution) and are silently
+    /// accepted-but-ignored rather than misrouted.
+    private nonisolated static func dispatchIDEMessage(_ line: Data, fd: Int32, windows: WindowRegistry?) {
+        guard let obj = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+              let event = obj["event"] as? String
+        else { return }
+
+        switch event {
+        case "ide.window.registered":
+            guard let identity = parseWindowIdentity(obj) else { return }
+            windows?.register(fd: fd, identity: identity)
+        case "ide.window.focus":
+            windows?.setFocused(fd: fd, focused: (obj["focused"] as? Bool) ?? false)
+        case "ide.window.unregistered":
+            windows?.unregister(fd: fd)
+        case "ide.terminal.open":
+            guard let pid = intValue(obj["terminal_pid"]) else { return }
+            windows?.bindTerminal(pid: pid, toWindowFD: fd)
+        case "ide.terminal.close":
+            guard let pid = intValue(obj["terminal_pid"]) else { return }
+            windows?.unbindTerminal(pid: pid)
+        default:
+            break
+        }
+    }
+
+    private nonisolated static func parseWindowIdentity(_ obj: [String: Any]) -> WindowIdentity? {
+        guard let ide = obj["ide"] as? String,
+              let windowID = obj["window_id"] as? String,
+              let uriScheme = obj["uri_scheme"] as? String
+        else { return nil }
+        return WindowIdentity(
+            ide: ide, windowID: windowID, pid: intValue(obj["pid"]) ?? 0,
+            workspaceRoots: (obj["workspace_roots"] as? [String]) ?? [],
+            uriScheme: uriScheme, remoteName: obj["remote_name"] as? String)
+    }
+
+    private nonisolated static func intValue(_ value: Any?) -> Int? {
+        (value as? Int) ?? (value as? NSNumber)?.intValue
     }
 
     /// Reads exactly one top-level JSON value (object or array), tracking
