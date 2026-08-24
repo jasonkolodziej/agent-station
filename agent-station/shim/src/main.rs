@@ -24,7 +24,10 @@ use std::time::Duration;
 
 const PROTOCOL_VERSION: u32 = 1;
 const MAX_PAYLOAD_BYTES: usize = 256 * 1024;
-const CONNECT_TIMEOUT: Duration = Duration::from_millis(50);
+// No CONNECT_TIMEOUT: unlike TcpStream, UnixStream::connect is local kernel
+// IPC, not a network handshake — it does not block waiting on the daemon the
+// way a slow peer can stall write()/read(), so std exposes no connect_timeout
+// for it and there is nothing to bound here.
 const WRITE_TIMEOUT: Duration = Duration::from_millis(50);
 /// Only used with --await-decision. Must stay below the provider's own hook
 /// timeout or we turn a permission prompt into a hung agent.

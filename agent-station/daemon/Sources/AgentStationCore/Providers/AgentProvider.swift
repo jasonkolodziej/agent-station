@@ -46,7 +46,7 @@ public struct InstallDiff: Sendable {
     public var before: String
     public var after: String
     public var scope: Scope
-    public enum Scope: Sendable { case user, project, managed }
+    public enum Scope: String, Codable, Sendable { case user, project, managed }
 }
 
 public struct ReplyToken: RawRepresentable, Sendable, Hashable {
@@ -74,6 +74,14 @@ public struct RawEvent: Sendable {
     public let focus: FocusContext?
     public let raw: Data           // verbatim provider payload from the shim
     public let truncated: Bool
+
+    public init(provider: ProviderID, receivedAt: Date = Date(), focus: FocusContext? = nil, raw: Data, truncated: Bool = false) {
+        self.provider = provider
+        self.receivedAt = receivedAt
+        self.focus = focus
+        self.raw = raw
+        self.truncated = truncated
+    }
 }
 
 public struct UsageSample: Sendable {

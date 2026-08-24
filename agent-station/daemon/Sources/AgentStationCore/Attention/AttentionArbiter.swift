@@ -31,6 +31,13 @@ public struct ArbiterContext: Sendable {
     /// True when a Focus mode / DND is engaged.
     public var doNotDisturb: Bool
     public var breakThroughOnBlocking: Bool  // opt-in, off by default
+
+    public init(frontmostBundleID: String? = nil, focusedWindowID: String? = nil, doNotDisturb: Bool, breakThroughOnBlocking: Bool) {
+        self.frontmostBundleID = frontmostBundleID
+        self.focusedWindowID = focusedWindowID
+        self.doNotDisturb = doNotDisturb
+        self.breakThroughOnBlocking = breakThroughOnBlocking
+    }
 }
 
 public actor AttentionArbiter {

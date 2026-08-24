@@ -30,8 +30,11 @@ let package = Package(
         ),
         .testTarget(
             name: "AgentStationCoreTests",
-            dependencies: ["AgentStationCore"],
-            resources: [.copy("../../fixtures")]
+            dependencies: ["AgentStationCore"]
+            // fixtures/ lives at the repo root, outside this package, so SPM
+            // can't declare it as a `resources:` copy target (must be within
+            // the package directory structure). NormalizerGoldenTests reads
+            // it directly off disk via a path relative to #filePath instead.
         ),
     ]
 )

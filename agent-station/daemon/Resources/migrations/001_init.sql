@@ -1,5 +1,7 @@
 -- Agent Station store. SQLite, WAL. See ARCHITECTURE.md §11.
-PRAGMA journal_mode = WAL;
+-- WAL mode is set on the connection (Store.swift's Configuration.prepareDatabase),
+-- not here: `PRAGMA journal_mode = WAL` cannot run inside a transaction, and
+-- GRDB's DatabaseMigrator wraps every registered migration in one.
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE project (
