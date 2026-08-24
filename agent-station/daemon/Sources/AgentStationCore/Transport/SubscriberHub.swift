@@ -63,6 +63,20 @@ public final class SubscriberHub: @unchecked Sendable {
         broadcast(data, toRaw: true)
     }
 
+    /// The VS Code status bar's live counts (ARCHITECTURE.md §7.2,
+    /// `extension.ts`'s `msg['event'] === 'ui.counts'` handler). Goes to the
+    /// same canonical-mode pool as `publish` — an IDE-client connection folds
+    /// into that pool the moment it registers (UnixSocketServer), so this
+    /// reaches it on the connection it already has open. Not a
+    /// `CanonicalEvent`, so it can't go through `publish`: `station tail`'s
+    /// canonical-mode reader tries to decode every line as one and just skips
+    /// whatever doesn't fit, which is exactly what should happen here.
+    public func publishCounts(running: Int, needsAttention: Int) {
+        let dict: [String: Any] = ["event": "ui.counts", "running": running, "needs_attention": needsAttention]
+        guard let data = try? JSONSerialization.data(withJSONObject: dict) else { return }
+        broadcast(data, toRaw: false)
+    }
+
     private func broadcast(_ payload: Data, toRaw wantsRaw: Bool) {
         var line = payload
         line.append(0x0A)

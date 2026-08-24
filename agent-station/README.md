@@ -23,6 +23,18 @@ terminal pane or editor window that needs you.
 - **M1 (this milestone):** window identity, URI handler, notification
   suppression, integrated-terminal session binding, status bar — all stable
   API, Marketplace-publishable. See ARCHITECTURE.md §7.2.
+  - ✅ Window identity, focus, and terminal binding — daemon-side
+    `WindowRegistry` plus the corrected `daemonClient.ts`/`windowIdentity.ts`.
+    Verified live against the real daemon.
+  - ✅ Status bar has something to show: `ui.counts` is computed from the
+    session table and the attention arbiter and pushed on every event batch.
+  - ✅ Notification-suppression *wiring* — `query.suppression_rules` /
+    `suppression_rules` round-trips correctly, but returns no rules yet: no
+    provider manifest has a verified VS Code settings key to suppress. See
+    §4.2's `[notifications]` section.
+  - ⬜ Not yet done: running the extension in an actual VS Code Extension
+    Development Host; Marketplace listing readiness (icon, publisher
+    metadata) hasn't been reviewed.
 
 `make spike` still exists to re-run the M0a questions if VS Code's proposed
 API surface changes — see open question 6 in ARCHITECTURE.md §17.

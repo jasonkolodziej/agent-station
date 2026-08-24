@@ -84,6 +84,15 @@ public final class Store: Sendable {
 
     // MARK: - Reads
 
+    /// Sessions with no `ended_at` yet — what `ui.counts`' `running` field
+    /// reports to the VS Code status bar. Backed by `ix_session_active`, the
+    /// partial index the schema already carries for exactly this query.
+    public func activeSessionCount() throws -> Int {
+        try dbQueue.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM session WHERE ended_at IS NULL") ?? 0
+        }
+    }
+
     public struct UnmappedEventRow: Sendable {
         public let provider: String
         public let providerEvent: String

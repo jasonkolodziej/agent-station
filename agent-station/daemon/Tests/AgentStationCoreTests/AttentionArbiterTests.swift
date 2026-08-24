@@ -159,6 +159,45 @@ final class AttentionArbiterTests: XCTestCase {
         XCTAssertEqual(reason, "do not disturb")
     }
 
+    // MARK: - needsAttentionCount (ui.counts' `needs_attention`)
+
+    func testNeedsAttentionCountsOnlyBlockingAttentionAndErrorUnacknowledged() async {
+        let arbiter = AttentionArbiter()
+        _ = await arbiter.admit(event(kind: .approvalRequested, sessionID: "cc:blocking", risk: .high, deadlineMS: 1_000), context: neutralContext())
+        _ = await arbiter.admit(event(kind: .errorRaised, sessionID: "cc:error"), context: neutralContext())
+        // foreground/ambient priorities shouldn't count even though they're "live".
+        _ = await arbiter.admit(event(kind: .turnCompleted, sessionID: "cc:foreground"), context: neutralContext())
+        _ = await arbiter.admit(event(kind: .toolStarted, sessionID: "cc:ambient"), context: neutralContext())
+
+        let count = await arbiter.needsAttentionCount()
+        XCTAssertEqual(count, 2)
+    }
+
+    func testNeedsAttentionCountExcludesAcknowledgedSessions() async {
+        let arbiter = AttentionArbiter()
+        _ = await arbiter.admit(event(kind: .turnCompleted, sessionID: "cc:done"), context: neutralContext())
+        // turnCompleted alone isn't attention-worthy; use an approval instead.
+        _ = await arbiter.admit(event(kind: .approvalRequested, sessionID: "cc:approval", risk: .low), context: neutralContext())
+        let beforeAck = await arbiter.needsAttentionCount()
+        XCTAssertEqual(beforeAck, 1)
+
+        await arbiter.acknowledge(sessionID: "cc:approval")
+        let afterAck = await arbiter.needsAttentionCount()
+        XCTAssertEqual(afterAck, 0)
+    }
+
+    func testRetireRemovesTheSessionFromNeedsAttentionCount() async {
+        let arbiter = AttentionArbiter()
+        _ = await arbiter.admit(event(kind: .approvalRequested, sessionID: "cc:ending", risk: .high, deadlineMS: 1_000), context: neutralContext())
+        let beforeRetire = await arbiter.needsAttentionCount()
+        XCTAssertEqual(beforeRetire, 1)
+
+        await arbiter.retire(sessionID: "cc:ending")
+
+        let afterRetire = await arbiter.needsAttentionCount()
+        XCTAssertEqual(afterRetire, 0)
+    }
+
     func testDoNotDisturbLetsBlockingThroughWhenOptedIn() async {
         let arbiter = AttentionArbiter()
         var context = neutralContext()

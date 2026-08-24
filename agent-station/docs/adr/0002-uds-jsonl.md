@@ -17,3 +17,13 @@ newline-delimited JSON, 256KB frame cap.
   check on the hot path.
 - Remote/SSH sessions are out of scope. `SSH_TTY` in the focus context is a
   marker for "focus routing is a lie here," not something we try to solve.
+- **The daemon can't parse frames by splitting on `\n`, even though the wire
+  format is JSONL.** The shim splices a provider's raw payload into the
+  envelope byte-verbatim and never reformats it (ADR-0003) — a pretty-printed
+  provider payload puts literal newline bytes inside a single frame, before
+  the frame is actually over. Discovered when a checked-in fixture (itself
+  pretty-printed) silently failed to reach the normalizer. `UnixSocketServer`
+  reads one top-level JSON value by tracking brace/bracket depth and string
+  escaping instead of scanning for `\n`. Each frame is still written with a
+  trailing newline — that stays a convention for tooling (`nc`, log capture)
+  to read by, not something the parser itself depends on.

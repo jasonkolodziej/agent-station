@@ -2,8 +2,35 @@ import * as vscode from 'vscode';
 import { DaemonClient } from './daemonClient';
 import { registerWindowIdentity, bindIntegratedTerminals } from './windowIdentity';
 import { registerUriHandler } from './uriHandler';
-import { SettingsManager } from './settingsManager';
+import { SettingsManager, SuppressionRule } from './settingsManager';
 import { StatusBar } from './statusBar';
+
+/**
+ * Sends `query.suppression_rules` and waits for the daemon's matching
+ * `suppression_rules` reply on the same connection. One-shot: registers a
+ * listener, resolves on the first matching message (or the timeout), then
+ * always disposes — `client.onEvent` fires for everything on this
+ * connection (canonical events, ui.counts), not just replies to this query.
+ */
+function requestSuppressionRules(client: DaemonClient): Promise<SuppressionRule[]> {
+  return new Promise(resolve => {
+    let settled = false;
+    const sub = client.onEvent(msg => {
+      if (msg['event'] !== 'suppression_rules' || settled) return;
+      settled = true;
+      sub.dispose();
+      clearTimeout(timer);
+      resolve((msg['rules'] as SuppressionRule[] | undefined) ?? []);
+    });
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      sub.dispose();
+      resolve([]);
+    }, 3_000);
+    client.send({ event: 'query.suppression_rules' });
+  });
+}
 
 /**
  * M1 — F11a. Everything here is stable API and Marketplace-publishable.
@@ -40,7 +67,14 @@ export function activate(ctx: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('agentStation.suppressProviderNotifications', async () => {
       // Rules come from the daemon's manifest set, not hardcoded here — that's
       // what makes this survive upstream setting renames.
-      client.send({ event: 'query.suppression_rules' });
+      const rules = await requestSuppressionRules(client);
+      if (rules.length === 0) {
+        vscode.window.showInformationMessage(
+          'Agent Station: no notification suppression rules available yet — no connected provider manifest declares any.',
+        );
+        return;
+      }
+      await settings.apply(rules);
     }),
     vscode.commands.registerCommand('agentStation.showSessions', () => {
       client.send({ event: 'ui.expand_requested', source: 'vscode' });

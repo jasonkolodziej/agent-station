@@ -44,10 +44,24 @@ public struct ProviderManifest: Codable, Sendable {
         public var pathGlob: String?
         public var tokenPath: String?
     }
+    /// VS Code *settings* keys (not hook config — see `Install`) whose own
+    /// notification UI Agent Station takes over, per ARCHITECTURE.md §7.1
+    /// step 1: "turn the source off." Only meaningful for a provider that
+    /// ships its own VS Code extension with its own notification setting —
+    /// a CLI-only provider has nothing here.
+    ///
+    /// Never invent these. A wrong key either does nothing (if it doesn't
+    /// exist) or silently changes an unrelated setting (if it collides with
+    /// something real) — worse than leaving this empty, which is what an
+    /// unverified provider gets.
+    public struct NotificationSuppression: Codable, Sendable {
+        public var keys: [String]
+    }
 
     public var provider: Meta
     public var capabilities: ProviderCapabilities
     public var install: Install
     public var map: [Mapping]
     public var usage: UsageSource?
+    public var notifications: NotificationSuppression?
 }

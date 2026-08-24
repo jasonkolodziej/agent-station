@@ -120,6 +120,14 @@ public actor AttentionArbiter {
         acknowledgedTurns.remove(sessionID)
     }
 
+    /// Outstanding, unacknowledged things a human needs to act on right now —
+    /// the number the VS Code status bar's `$(bell-dot)` badge shows (§7.2's
+    /// `ui.counts`). `.foreground`/`.background`/`.ambient` are "FYI, seen it
+    /// or don't need to," not attention-worthy in this sense.
+    public func needsAttentionCount() -> Int {
+        live.values.filter { !$0.acknowledged && $0.priority <= .error }.count
+    }
+
     // MARK: - Private
 
     private func currentlyExpanded() -> Activity? {

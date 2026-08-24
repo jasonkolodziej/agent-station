@@ -15,7 +15,20 @@ struct Daemon {
         let windows = WindowRegistry()
         let server = UnixSocketServer()
 
-        try await server.start(subscribers: subscribers, windows: windows) { raw in
+        // Built once at startup, not looked up per-query: manifests are all
+        // seeded in-memory at AdapterRegistry.init() today (TOML loading from
+        // disk is M6), so this snapshot can't go stale before the daemon
+        // restarts anyway, and it keeps the connection-handling code — which
+        // answers this synchronously off a plain POSIX thread, not an actor
+        // context — from needing to reach into an actor at all.
+        var suppressionRules: [String: [String]] = [:]
+        for manifest in await registry.allManifests() {
+            if let keys = manifest.notifications?.keys, !keys.isEmpty {
+                suppressionRules[manifest.provider.id] = keys
+            }
+        }
+
+        try await server.start(subscribers: subscribers, windows: windows, suppressionRules: suppressionRules) { raw in
             Task {
                 await Self.process(
                     raw, registry: registry, normalizer: normalizer,
@@ -80,7 +93,20 @@ struct Daemon {
                 frontmostBundleID: nil, focusedWindowID: nil,
                 doNotDisturb: false, breakThroughOnBlocking: false)
             _ = await arbiter.admit(event, context: context)
+
+            // A session that ended has nothing left to hold attention state
+            // for. Without this, AttentionArbiter.live keeps every session
+            // ever seen since the daemon started, and needsAttentionCount()
+            // (ui.counts' `needs_attention`) would only ever grow.
+            if event.kind == .sessionEnded {
+                await arbiter.retire(sessionID: event.session.id)
+            }
         }
+
+        guard !result.events.isEmpty else { return }
+        let running = (try? store.activeSessionCount()) ?? 0
+        let needsAttention = await arbiter.needsAttentionCount()
+        subscribers.publishCounts(running: running, needsAttention: needsAttention)
     }
 
     /// Overridable via `AGENTSTATION_STORE_PATH` — see UnixSocketServer.defaultPath.

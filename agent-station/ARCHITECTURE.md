@@ -243,6 +243,14 @@ token_path = "$.usage"
 
 `when`/`$.` are a deliberately boring expression + JSONPath subset — enough for field extraction and branching, not a scripting language. Anything that needs real logic is Class D and gets a signed binary plugin.
 
+An optional `[notifications]` section — `keys = [...]`, VS Code settings keys
+— feeds §7.1 step 1 ("turn the source off") for a provider that *also* ships
+its own VS Code extension with its own notification UI. Qwen Code here is
+CLI-only, so it has none. Never populate this from a guess: a wrong key
+either does nothing or silently changes something unrelated, worse than
+leaving it empty until someone verifies the real key against the extension's
+own `package.json` contribution.
+
 ### 4.3 Native plugin interface (escape hatch)
 
 ```swift
@@ -433,6 +441,20 @@ daemon restart mid-session drops it, and a message sent before the socket's
 `connect` event fires is silently lost. `daemonClient.ts` exposes `onConnect`
 for exactly this — callers that need the daemon to know their current state
 hook it there, not at extension activation.
+
+**The daemon pushes back on the same connection, too.** After every batch of
+canonical events it processes, it recomputes and broadcasts
+`{event: "ui.counts", running, needs_attention}` to every registered window —
+`running` from the session table's `ended_at IS NULL` count, `needs_attention`
+from the attention arbiter's live, unacknowledged, blocking/attention/error
+activities. That drives the status bar's badge without a second poll or
+connection. The extension can also ask
+`{event: "query.suppression_rules"}` and gets back
+`{event: "suppression_rules", rules: [{provider, keys}]}` built from whichever
+registered provider manifests declare `[notifications] keys = [...]` — today
+that's none, deliberately: a wrong VS Code settings key either does nothing or
+silently changes something unrelated, and guessing one is worse than leaving
+the list empty until a manifest ships a verified key.
 
 **Chat participant (phase 2)** follows the Copilot pattern exactly — `vscode.chat.createChatParticipant('agent-station.station', handler)`, plus a `LanguageModelTool` so *other* agents can ask Agent Station "what's running and what has it cost me today." That inverts the relationship nicely: the station becomes queryable context, not just a notifier.
 

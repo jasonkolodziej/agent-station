@@ -56,6 +56,7 @@ public actor UnixSocketServer {
     /// WindowRegistry and ARCHITECTURE.md §7.2.
     public func start(
         subscribers: SubscriberHub? = nil, windows: WindowRegistry? = nil,
+        suppressionRules: [String: [String]] = [:],
         onEnvelope: @escaping EnvelopeHandler
     ) throws {
         guard listenFD < 0 else { return }
@@ -105,7 +106,9 @@ public actor UnixSocketServer {
         listenFD = fd
 
         let thread = Thread {
-            Self.acceptLoop(listenFD: fd, subscribers: subscribers, windows: windows, onEnvelope: onEnvelope)
+            Self.acceptLoop(
+                listenFD: fd, subscribers: subscribers, windows: windows,
+                suppressionRules: suppressionRules, onEnvelope: onEnvelope)
         }
         thread.name = "agentstationd.uds-accept"
         thread.start()
@@ -125,7 +128,7 @@ public actor UnixSocketServer {
 
     private nonisolated static func acceptLoop(
         listenFD: Int32, subscribers: SubscriberHub?, windows: WindowRegistry?,
-        onEnvelope: @escaping EnvelopeHandler
+        suppressionRules: [String: [String]], onEnvelope: @escaping EnvelopeHandler
     ) {
         while true {
             let clientFD = accept(listenFD, nil, nil)
@@ -136,7 +139,9 @@ public actor UnixSocketServer {
                 continue
             }
             let connectionThread = Thread {
-                Self.handleConnection(fd: clientFD, subscribers: subscribers, windows: windows, onEnvelope: onEnvelope)
+                Self.handleConnection(
+                    fd: clientFD, subscribers: subscribers, windows: windows,
+                    suppressionRules: suppressionRules, onEnvelope: onEnvelope)
             }
             connectionThread.start()
         }
@@ -144,7 +149,7 @@ public actor UnixSocketServer {
 
     private nonisolated static func handleConnection(
         fd: Int32, subscribers: SubscriberHub?, windows: WindowRegistry?,
-        onEnvelope: @escaping EnvelopeHandler
+        suppressionRules: [String: [String]], onEnvelope: @escaping EnvelopeHandler
     ) {
         // Peer validation (ARCHITECTURE.md §12): the connecting process must
         // run as the same user. getpeereid is macOS/BSD's LOCAL_PEERCRED
@@ -189,7 +194,7 @@ public actor UnixSocketServer {
             subscribers?.add(fd: fd, raw: false)
             var current: Data? = line
             while let message = current {
-                dispatchIDEMessage(message, fd: fd, windows: windows)
+                dispatchIDEMessage(message, fd: fd, windows: windows, suppressionRules: suppressionRules)
                 current = readOneJSONValue(fd: fd, cap: maxFrameBytes)
             }
             windows?.unregister(fd: fd) // safety net if unregistered wasn't sent explicitly
@@ -225,13 +230,13 @@ public actor UnixSocketServer {
         return event.hasPrefix("ide.")
     }
 
-    /// Dispatches one message from an IDE-client connection. `query.*`/`ui.*`
-    /// messages the extension also sends over this same connection
-    /// (`query.suppression_rules`, `ui.expand_requested`) aren't handled here
-    /// — those belong to subsystems that don't exist yet (M3's arbiter
-    /// aggregation, M4's suppression-rule resolution) and are silently
-    /// accepted-but-ignored rather than misrouted.
-    private nonisolated static func dispatchIDEMessage(_ line: Data, fd: Int32, windows: WindowRegistry?) {
+    /// Dispatches one message from an IDE-client connection. `ui.expand_requested`
+    /// (the extension also sends this over the same connection) isn't handled
+    /// here — it belongs to the notch panel, which doesn't exist yet (M3) —
+    /// and is silently accepted-but-ignored rather than misrouted.
+    private nonisolated static func dispatchIDEMessage(
+        _ line: Data, fd: Int32, windows: WindowRegistry?, suppressionRules: [String: [String]]
+    ) {
         guard let obj = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
               let event = obj["event"] as? String
         else { return }
@@ -250,6 +255,8 @@ public actor UnixSocketServer {
         case "ide.terminal.close":
             guard let pid = intValue(obj["terminal_pid"]) else { return }
             windows?.unbindTerminal(pid: pid)
+        case "query.suppression_rules":
+            replySuppressionRules(fd: fd, suppressionRules: suppressionRules)
         default:
             break
         }
@@ -268,6 +275,30 @@ public actor UnixSocketServer {
 
     private nonisolated static func intValue(_ value: Any?) -> Int? {
         (value as? Int) ?? (value as? NSNumber)?.intValue
+    }
+
+    /// Answers `query.suppression_rules` directly on the asking connection —
+    /// a targeted reply, not a broadcast, so this writes straight to `fd`
+    /// rather than going through SubscriberHub. `settingsManager.ts`'s
+    /// `apply()` is the eventual consumer; it stays unreachable from the
+    /// command palette until this returns something non-empty for at least
+    /// one provider, which today means none — see ProviderManifest's
+    /// `NotificationSuppression` doc comment on why these keys are seeded
+    /// empty rather than guessed.
+    private nonisolated static func replySuppressionRules(fd: Int32, suppressionRules: [String: [String]]) {
+        let rules = suppressionRules.map { ["provider": $0.key, "keys": $0.value] }
+        guard var data = try? JSONSerialization.data(withJSONObject: ["event": "suppression_rules", "rules": rules])
+        else { return }
+        data.append(0x0A)
+        _ = data.withUnsafeBytes { raw -> Int32 in
+            var offset = 0
+            while offset < raw.count {
+                let n = write(fd, raw.baseAddress!.advanced(by: offset), raw.count - offset)
+                if n <= 0 { return -1 }
+                offset += n
+            }
+            return 0
+        }
     }
 
     /// Reads exactly one top-level JSON value (object or array), tracking
