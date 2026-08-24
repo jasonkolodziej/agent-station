@@ -1,0 +1,44 @@
+{
+  "configurations": [
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:agent-station}/agent-station/daemon",
+      "name": "Debug agentstationd (agent-station/daemon)",
+      "target": "agentstationd",
+      "configuration": "debug",
+      "preLaunchTask": "swift: Build Debug agentstationd (agent-station/daemon)"
+    },
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:agent-station}/agent-station/daemon",
+      "name": "Release agentstationd (agent-station/daemon)",
+      "target": "agentstationd",
+      "configuration": "release",
+      "preLaunchTask": "swift: Build Release agentstationd (agent-station/daemon)"
+    },
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:agent-station}/agent-station/daemon",
+      "name": "Debug station (agent-station/daemon)",
+      "target": "station",
+      "configuration": "debug",
+      "preLaunchTask": "swift: Build Debug station (agent-station/daemon)"
+    },
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:agent-station}/agent-station/daemon",
+      "name": "Release station (agent-station/daemon)",
+      "target": "station",
+      "configuration": "release",
+      "preLaunchTask": "swift: Build Release station (agent-station/daemon)"
+    }
+  ]
+}
